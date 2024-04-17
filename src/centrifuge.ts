@@ -892,8 +892,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   }
 
   private _sendConnect(skipSending: boolean): any {
-    // const connectCommand = this._constructConnectCommand();
-    const connectCommand = this._data;
+    const connectCommand = this._constructConnectCommand();
     const self = this;
     this._call(connectCommand, skipSending).then(resolveCtx => {
       // @ts-ignore = improve later.
@@ -1067,9 +1066,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     if (hasSubs) {
       req.subs = subs;
     }
-    return {
-      connect: req
-    };
+    return this._data;
   }
 
   private _getHistoryRequest(channel: string, options?: HistoryOptions) {
