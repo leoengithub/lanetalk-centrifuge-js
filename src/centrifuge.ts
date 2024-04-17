@@ -892,7 +892,8 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   }
 
   private _sendConnect(skipSending: boolean): any {
-    const connectCommand = this._constructConnectCommand();
+    // const connectCommand = this._constructConnectCommand();
+    const connectCommand = this._data;
     const self = this;
     this._call(connectCommand, skipSending).then(resolveCtx => {
       // @ts-ignore = improve later.
