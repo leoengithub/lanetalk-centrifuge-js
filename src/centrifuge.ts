@@ -26,7 +26,6 @@ import {
 } from './types';
 
 import EventEmitter from 'events';
-import { v4 as uuid } from 'uuid';
 
 const defaults: Options = {
   token: '',
@@ -85,7 +84,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   private _node: string;
   private _subs: Record<string, Subscription>;
   private _serverSubs: Record<string, serverSubscription>;
-  // private _commandId: number;
+  private _commandId: number;
   private _commands: any[];
   private _batching: boolean;
   private _refreshRequired: boolean;
@@ -133,7 +132,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     this._node = '';
     this._subs = {};
     this._serverSubs = {};
-    // this._commandId = 0;
+    this._commandId = 0;
     this._commands = [];
     this._batching = false;
     this._refreshRequired = false;
@@ -497,7 +496,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   }
 
   private _nextCommandId() {
-    return uuid()
+    return ++this._commandId;
   }
 
   private _setNetworkEvents() {
