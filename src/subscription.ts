@@ -377,7 +377,7 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
       }
     }
 
-    const cmd = { subscribe: req };
+    const cmd = this._data;
 
     this._inflight = true;
 
