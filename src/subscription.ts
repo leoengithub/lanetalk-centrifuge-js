@@ -339,7 +339,7 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     if (!this._centrifuge._transportIsOpen) {
       return null;
     }
-    const channel = this.channel;
+    /*const channel = this.channel;
 
     const req: any = {
       channel: channel
@@ -375,7 +375,7 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
       if (epoch) {
         req.epoch = epoch;
       }
-    }
+    }*/
 
     const cmd = this._data;
 

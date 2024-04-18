@@ -936,41 +936,41 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   }
 
   private _constructConnectCommand(): any {
-    const req: any = {};
+    // const req: any = {};
 
-    if (this._token) {
-      req.token = this._token;
-    }
-    if (this._data) {
-      req.data = this._data;
-    }
-    if (this._config.name) {
-      req.name = this._config.name;
-    }
-    if (this._config.version) {
-      req.version = this._config.version;
-    }
+    // if (this._token) {
+    //   req.token = this._token;
+    // }
+    // if (this._data) {
+    //   req.data = this._data;
+    // }
+    // if (this._config.name) {
+    //   req.name = this._config.name;
+    // }
+    // if (this._config.version) {
+    //   req.version = this._config.version;
+    // }
 
-    const subs = {};
-    let hasSubs = false;
-    for (const channel in this._serverSubs) {
-      if (this._serverSubs.hasOwnProperty(channel) && this._serverSubs[channel].recoverable) {
-        hasSubs = true;
-        const sub = {
-          'recover': true
-        };
-        if (this._serverSubs[channel].offset) {
-          sub['offset'] = this._serverSubs[channel].offset;
-        }
-        if (this._serverSubs[channel].epoch) {
-          sub['epoch'] = this._serverSubs[channel].epoch;
-        }
-        subs[channel] = sub;
-      }
-    }
-    if (hasSubs) {
-      req.subs = subs;
-    }
+    // const subs = {};
+    // let hasSubs = false;
+    // for (const channel in this._serverSubs) {
+    //   if (this._serverSubs.hasOwnProperty(channel) && this._serverSubs[channel].recoverable) {
+    //     hasSubs = true;
+    //     const sub = {
+    //       'recover': true
+    //     };
+    //     if (this._serverSubs[channel].offset) {
+    //       sub['offset'] = this._serverSubs[channel].offset;
+    //     }
+    //     if (this._serverSubs[channel].epoch) {
+    //       sub['epoch'] = this._serverSubs[channel].epoch;
+    //     }
+    //     subs[channel] = sub;
+    //   }
+    // }
+    // if (hasSubs) {
+    //   req.subs = subs;
+    // }
     return this._data;
   }
 
