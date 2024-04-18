@@ -1,3 +1,5 @@
+This repo is a fork from the original https://github.com/centrifugal/centrifuge-js
+
 This SDK provides a client to connect to [Centrifugo](https://github.com/centrifugal/centrifugo) or any [Centrifuge-based](https://github.com/centrifugal/centrifuge) server using pure WebSocket or one of the alternative transports (HTTP-streaming, SSE/EventSource, experimental WebTransport) from web browser, ReactNative, or NodeJS environments.
 
 > [!IMPORTANT]  

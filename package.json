@@ -1,5 +1,5 @@
 {
-  "name": "lanetalk-centrifuge",
+  "name": "lanetalk-centrifuge-js",
   "version": "5.1.1",
   "description": "JavaScript client SDK for bidirectional communication with Centrifugo and Centrifuge-based server from browser",
   "main": "build/index.js",
