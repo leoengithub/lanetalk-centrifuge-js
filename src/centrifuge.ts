@@ -79,7 +79,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   private _node: string;
   private _subs: Record<string, Subscription>;
   private _serverSubs: Record<string, serverSubscription>;
-  // private _commandId: number;
+  private _commandId: string;
   private _commands: any[];
   private _batching: boolean;
   private _refreshRequired: boolean;
@@ -127,7 +127,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     this._node = '';
     this._subs = {};
     this._serverSubs = {};
-    // this._commandId = 0;
+    this._commandId = uuidv4();
     this._commands = [];
     this._batching = false;
     this._refreshRequired = false;
@@ -672,6 +672,11 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     let wasOpen = false;
     const initialCommands: any[] = [];
 
+    // Store the UUID if not already stored or reuse the existing one.
+    if (!self._commandId) {
+      self._commandId = uuidv4();  // Generate and store a new UUID.
+    }
+
     if (this._transport.emulation()) {
       const connectCommand = self._sendConnect(true);
       initialCommands.push(connectCommand);
@@ -712,7 +717,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
         self.stopBatching();
         //@ts-ignore must be used only for debug and test purposes. Exposed only for non-emulation transport.
         self.emit('__centrifuge_debug:connect_frame_sent', {})
-      },
+},
       onError: function (e: any) {
         if (self._transportId != transportId) {
           self._debug('error callback from non-actual transport');
