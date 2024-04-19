@@ -4,7 +4,11 @@ import {
   connectingCodes, subscribingCodes
 } from './codes';
 
+import { SockjsTransport } from './transport_sockjs';
 import { WebsocketTransport } from './transport_websocket';
+import { HttpStreamTransport } from './transport_http_stream';
+import { SseTransport } from './transport_sse';
+import { WebtransportTransport } from './transport_webtransport';
 
 import { JsonCodec } from './json';
 
@@ -22,7 +26,6 @@ import {
 } from './types';
 
 import EventEmitter from 'events';
-import { v4 as uuidv4 } from 'uuid';
 
 const defaults: Options = {
   token: '',
@@ -36,6 +39,8 @@ const defaults: Options = {
   readableStream: null,
   websocket: null,
   eventsource: null,
+  sockjs: null,
+  sockjsOptions: {},
   emulationEndpoint: '/emulation',
   minReconnectDelay: 500,
   maxReconnectDelay: 20000,
@@ -79,7 +84,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   private _node: string;
   private _subs: Record<string, Subscription>;
   private _serverSubs: Record<string, serverSubscription>;
-  // private _commandId: string;
+  private _commandId: number;
   private _commands: any[];
   private _batching: boolean;
   private _refreshRequired: boolean;
@@ -127,7 +132,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     this._node = '';
     this._subs = {};
     this._serverSubs = {};
-    // this._commandId = '';
+    this._commandId = 0;
     this._commands = [];
     this._batching = false;
     this._refreshRequired = false;
@@ -490,6 +495,10 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     return this.state === State.Connected;
   }
 
+  private _nextCommandId() {
+    return ++this._commandId;
+  }
+
   private _setNetworkEvents() {
     if (this._networkEventsSet) {
       return;
@@ -617,6 +626,42 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       }
     }
 
+    let sockjs = null;
+    if (this._config.sockjs !== null) {
+      sockjs = this._config.sockjs;
+    } else {
+      if (typeof globalThis.SockJS !== 'undefined') {
+        sockjs = globalThis.SockJS;
+      }
+    }
+
+    let eventsource: any = null;
+    if (this._config.eventsource !== null) {
+      eventsource = this._config.eventsource;
+    } else {
+      if (typeof globalThis.EventSource !== 'undefined') {
+        eventsource = globalThis.EventSource;
+      }
+    }
+
+    let fetchFunc: any = null;
+    if (this._config.fetch !== null) {
+      fetchFunc = this._config.fetch;
+    } else {
+      if (typeof globalThis.fetch !== 'undefined') {
+        fetchFunc = globalThis.fetch;
+      }
+    }
+
+    let readableStream: any = null;
+    if (this._config.readableStream !== null) {
+      readableStream = this._config.readableStream;
+    } else {
+      if (typeof globalThis.ReadableStream !== 'undefined') {
+        readableStream = globalThis.ReadableStream;
+      }
+    }
+
     if (!this._emulation) {
       if (startsWith(this._endpoint, 'http')) {
         throw new Error('Provide explicit transport endpoints configuration in case of using HTTP (i.e. using array of TransportEndpoint instead of a single string), or use ws(s):// scheme in an endpoint if you aimed using WebSocket transport');
@@ -650,6 +695,59 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
           });
           if (!this._transport.supported()) {
             this._debug('websocket transport not available');
+            this._currentTransportIndex++;
+            count++;
+            continue;
+          }
+        } else if (transportName === 'webtransport') {
+          this._debug('trying webtransport transport');
+          this._transport = new WebtransportTransport(transportEndpoint, {
+            webtransport: globalThis.WebTransport,
+            decoder: this._codec,
+            encoder: this._codec
+          });
+          if (!this._transport.supported()) {
+            this._debug('webtransport transport not available');
+            this._currentTransportIndex++;
+            count++;
+            continue;
+          }
+        } else if (transportName === 'http_stream') {
+          this._debug('trying http_stream transport');
+          this._transport = new HttpStreamTransport(transportEndpoint, {
+            fetch: fetchFunc,
+            readableStream: readableStream,
+            emulationEndpoint: this._config.emulationEndpoint,
+            decoder: this._codec,
+            encoder: this._codec
+          });
+          if (!this._transport.supported()) {
+            this._debug('http_stream transport not available');
+            this._currentTransportIndex++;
+            count++;
+            continue;
+          }
+        } else if (transportName === 'sse') {
+          this._debug('trying sse transport');
+          this._transport = new SseTransport(transportEndpoint, {
+            eventsource: eventsource,
+            fetch: fetchFunc,
+            emulationEndpoint: this._config.emulationEndpoint,
+          });
+          if (!this._transport.supported()) {
+            this._debug('sse transport not available');
+            this._currentTransportIndex++;
+            count++;
+            continue;
+          }
+        } else if (transportName === 'sockjs') {
+          this._debug('trying sockjs');
+          this._transport = new SockjsTransport(transportEndpoint, {
+            sockjs: sockjs,
+            sockjsOptions: this._config.sockjsOptions
+          });
+          if (!this._transport.supported()) {
+            this._debug('sockjs transport not available');
             this._currentTransportIndex++;
             count++;
             continue;
@@ -708,7 +806,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
         self.stopBatching();
         //@ts-ignore must be used only for debug and test purposes. Exposed only for non-emulation transport.
         self.emit('__centrifuge_debug:connect_frame_sent', {})
-},
+      },
       onError: function (e: any) {
         if (self._transportId != transportId) {
           self._debug('error callback from non-actual transport');
@@ -933,42 +1031,44 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   }
 
   private _constructConnectCommand(): any {
-    // const req: any = {};
+    const req: any = {};
 
-    // if (this._token) {
-    //   req.token = this._token;
-    // }
-    // if (this._data) {
-    //   req.data = this._data;
-    // }
-    // if (this._config.name) {
-    //   req.name = this._config.name;
-    // }
-    // if (this._config.version) {
-    //   req.version = this._config.version;
-    // }
+    if (this._token) {
+      req.token = this._token;
+    }
+    if (this._data) {
+      req.data = this._data;
+    }
+    if (this._config.name) {
+      req.name = this._config.name;
+    }
+    if (this._config.version) {
+      req.version = this._config.version;
+    }
 
-    // const subs = {};
-    // let hasSubs = false;
-    // for (const channel in this._serverSubs) {
-    //   if (this._serverSubs.hasOwnProperty(channel) && this._serverSubs[channel].recoverable) {
-    //     hasSubs = true;
-    //     const sub = {
-    //       'recover': true
-    //     };
-    //     if (this._serverSubs[channel].offset) {
-    //       sub['offset'] = this._serverSubs[channel].offset;
-    //     }
-    //     if (this._serverSubs[channel].epoch) {
-    //       sub['epoch'] = this._serverSubs[channel].epoch;
-    //     }
-    //     subs[channel] = sub;
-    //   }
-    // }
-    // if (hasSubs) {
-    //   req.subs = subs;
-    // }
-    return this._data;
+    const subs = {};
+    let hasSubs = false;
+    for (const channel in this._serverSubs) {
+      if (this._serverSubs.hasOwnProperty(channel) && this._serverSubs[channel].recoverable) {
+        hasSubs = true;
+        const sub = {
+          'recover': true
+        };
+        if (this._serverSubs[channel].offset) {
+          sub['offset'] = this._serverSubs[channel].offset;
+        }
+        if (this._serverSubs[channel].epoch) {
+          sub['epoch'] = this._serverSubs[channel].epoch;
+        }
+        subs[channel] = sub;
+      }
+    }
+    if (hasSubs) {
+      req.subs = subs;
+    }
+    return {
+      connect: req
+    };
   }
 
   private _getHistoryRequest(channel: string, options?: HistoryOptions) {
@@ -1090,9 +1190,8 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
 
   private _call(cmd: any, skipSending: boolean) {
     return new Promise((resolve, reject) => {
-      const id = uuidv4();  // Use UUID for all command tracking
-      cmd.id = id;
-      this._registerCall(id, resolve, reject);
+      cmd.id = this._nextCommandId();
+      this._registerCall(cmd.id, resolve, reject);
       if (!skipSending) {
         this._addCommand(cmd);
       }
@@ -1687,7 +1786,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     return errObject;
   }
 
-  private _registerCall(id: string, callback: any, errback: any) {
+  private _registerCall(id: number, callback: any, errback: any) {
     this._callbacks[id] = {
       callback: callback,
       errback: errback,

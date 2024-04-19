@@ -21,18 +21,18 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
   private _getToken: null | ((ctx: SubscriptionTokenContext) => Promise<string>);
   private _minResubscribeDelay: number;
   private _maxResubscribeDelay: number;
-  // private _recover: boolean;
-  // private _offset: number | null;
-  // private _epoch: string | null;
+  private _recover: boolean;
+  private _offset: number | null;
+  private _epoch: string | null;
   private _resubscribeAttempts: number;
   private _promiseId: number;
 
   private _token: string;
   private _data: any | null;
   private _getData: null | ((ctx: SubscriptionDataContext) => Promise<any>);
-  // private _recoverable: boolean;
-  // private _positioned: boolean;
-  // private _joinLeave: boolean;
+  private _recoverable: boolean;
+  private _positioned: boolean;
+  private _joinLeave: boolean;
   // @ts-ignore – this is used by a client in centrifuge.ts.
   private _inflight: boolean;
 
@@ -46,12 +46,12 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     this._getToken = null;
     this._data = null;
     this._getData = null;
-    // this._recover = false;
-    // this._offset = null;
-    // this._epoch = null;
-    // this._recoverable = false;
-    // this._positioned = false;
-    // this._joinLeave = false;
+    this._recover = false;
+    this._offset = null;
+    this._epoch = null;
+    this._recoverable = false;
+    this._positioned = false;
+    this._joinLeave = false;
     this._minResubscribeDelay = 500;
     this._maxResubscribeDelay = 20000;
     this._resubscribeTimeout = null;
@@ -172,9 +172,9 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     return ++this._promiseId;
   }
 
-  // private _needRecover() {
-  //   return this._recover === true;
-  // }
+  private _needRecover() {
+    return this._recover === true;
+  }
 
   private _isUnsubscribed() {
     return this.state === SubscriptionState.Unsubscribed;
@@ -217,11 +217,11 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     }
     this._clearSubscribingState();
 
-    // if (result.recoverable) {
-    //   this._recover = true;
-    //   this._offset = result.offset || 0;
-    //   this._epoch = result.epoch || '';
-    // }
+    if (result.recoverable) {
+      this._recover = true;
+      this._offset = result.offset || 0;
+      this._epoch = result.epoch || '';
+    }
 
     this._setState(SubscriptionState.Subscribed);
     // @ts-ignore – we are hiding some methods from public API autocompletion.
@@ -283,11 +283,11 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
             return;
           }
           self._data = data;
-          self._sendSubscribe();
+          self._sendSubscribe(self._token);
         })
         return null;
       } else {
-        return self._sendSubscribe();
+        return self._sendSubscribe(self._token);
       }
     }
 
@@ -306,10 +306,10 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
             return;
           }
           self._data = data;
-          self._sendSubscribe();
+          self._sendSubscribe(token);
         })
       } else {
-        self._sendSubscribe();
+        self._sendSubscribe(token);
       }
     }).catch(function (e) {
       if (!self._isSubscribing()) {
@@ -332,14 +332,14 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     return null;
   }
 
-  private _sendSubscribe(): any {
+  private _sendSubscribe(token: string): any {
     // we also need to check for transport state before sending subscription
     // because it may change for subscription with side effects (getData, getToken options)
     // @ts-ignore – we are hiding some symbols from public API autocompletion.
     if (!this._centrifuge._transportIsOpen) {
       return null;
     }
-    /*const channel = this.channel;
+    const channel = this.channel;
 
     const req: any = {
       channel: channel
@@ -375,9 +375,9 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
       if (epoch) {
         req.epoch = epoch;
       }
-    }*/
+    }
 
-    const cmd = this._data;
+    const cmd = { subscribe: req };
 
     this._inflight = true;
 
@@ -451,9 +451,9 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     // @ts-ignore – we are hiding some methods from public API autocompletion.
     const ctx = this._centrifuge._getPublicationContext(this.channel, pub);
     this.emit('publication', ctx);
-    // if (pub.offset) {
-    //   this._offset = pub.offset;
-    // }
+    if (pub.offset) {
+      this._offset = pub.offset;
+    }
   }
 
   protected _handleJoin(join: any) {
@@ -536,11 +536,11 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     if (!options) {
       return;
     }
-    // if (options.since) {
-    //   this._offset = options.since.offset;
-    //   this._epoch = options.since.epoch;
-    //   this._recover = true;
-    // }
+    if (options.since) {
+      this._offset = options.since.offset;
+      this._epoch = options.since.epoch;
+      this._recover = true;
+    }
     if (options.data) {
       this._data = options.data;
     }
@@ -559,32 +559,32 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     if (options.getToken) {
       this._getToken = options.getToken;
     }
-    // if (options.positioned === true) {
-    //   this._positioned = true;
-    // }
-    // if (options.recoverable === true) {
-    //   this._recoverable = true;
-    // }
-    // if (options.joinLeave === true) {
-    //   this._joinLeave = true;
-    // }
+    if (options.positioned === true) {
+      this._positioned = true;
+    }
+    if (options.recoverable === true) {
+      this._recoverable = true;
+    }
+    if (options.joinLeave === true) {
+      this._joinLeave = true;
+    }
   }
 
-  // private _getOffset() {
-  //   const offset = this._offset;
-  //   if (offset !== null) {
-  //     return offset;
-  //   }
-  //   return 0;
-  // }
+  private _getOffset() {
+    const offset = this._offset;
+    if (offset !== null) {
+      return offset;
+    }
+    return 0;
+  }
 
-  // private _getEpoch() {
-  //   const epoch = this._epoch;
-  //   if (epoch !== null) {
-  //     return epoch;
-  //   }
-  //   return '';
-  // }
+  private _getEpoch() {
+    const epoch = this._epoch;
+    if (epoch !== null) {
+      return epoch;
+    }
+    return '';
+  }
 
   private _clearRefreshTimeout() {
     if (this._refreshTimeout !== null) {

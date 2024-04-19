@@ -123,6 +123,10 @@ export interface Options {
   readableStream: any | null;
   /** provide shim for EventSource object */
   eventsource: any | null;
+  /** provide shim for SockJS object */
+  sockjs: any | null;
+  /** allows modifying options passed to SockJS constructor */
+  sockjsOptions: SockjsOptions;
   /** which emulation endpoint to use */
   emulationEndpoint: string;
   /** EventTarget for network online/offline events, in browser environment 
