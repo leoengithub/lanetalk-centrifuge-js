@@ -79,7 +79,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   private _node: string;
   private _subs: Record<string, Subscription>;
   private _serverSubs: Record<string, serverSubscription>;
-  private _commandId: string;
+  // private _commandId: string;
   private _commands: any[];
   private _batching: boolean;
   private _refreshRequired: boolean;
@@ -127,7 +127,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     this._node = '';
     this._subs = {};
     this._serverSubs = {};
-    this._commandId = uuidv4();
+    // this._commandId = '';
     this._commands = [];
     this._batching = false;
     this._refreshRequired = false;
@@ -490,10 +490,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     return this.state === State.Connected;
   }
 
-  private _nextCommandId() {
-    return uuidv4();
-  }
-
   private _setNetworkEvents() {
     if (this._networkEventsSet) {
       return;
@@ -671,11 +667,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     self._debug("id of transport", transportId);
     let wasOpen = false;
     const initialCommands: any[] = [];
-
-    // Store the UUID if not already stored or reuse the existing one.
-    if (!self._commandId) {
-      self._commandId = uuidv4();  // Generate and store a new UUID.
-    }
 
     if (this._transport.emulation()) {
       const connectCommand = self._sendConnect(true);
@@ -1099,8 +1090,9 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
 
   private _call(cmd: any, skipSending: boolean) {
     return new Promise((resolve, reject) => {
-      cmd.id = this._nextCommandId();
-      this._registerCall(cmd.id, resolve, reject);
+      const id = uuidv4();  // Use UUID for all command tracking
+      cmd.id = id;
+      this._registerCall(id, resolve, reject);
       if (!skipSending) {
         this._addCommand(cmd);
       }
@@ -1695,7 +1687,7 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     return errObject;
   }
 
-  private _registerCall(id: number, callback: any, errback: any) {
+  private _registerCall(id: string, callback: any, errback: any) {
     this._callbacks[id] = {
       callback: callback,
       errback: errback,
