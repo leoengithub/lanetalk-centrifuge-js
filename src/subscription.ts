@@ -1,9 +1,9 @@
 import EventEmitter from 'events';
-import { Centrifuge, UnauthorizedError } from './centrifuge';
+import { Centrifuge } from './centrifuge';
 import { errorCodes, unsubscribedCodes, subscribingCodes, connectingCodes } from './codes';
 import {
   State, SubscriptionEvents, SubscriptionOptions,
-  SubscriptionState, SubscriptionTokenContext, TypedEventEmitter,
+  SubscriptionState, TypedEventEmitter,
   SubscriptionDataContext
 } from './types';
 import { ttlMilliseconds, backoff } from './utils';
@@ -17,16 +17,11 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
   private _promises: Record<number, any>;
   private _resubscribeTimeout?: null | ReturnType<typeof setTimeout> = null;
   private _refreshTimeout?: null | ReturnType<typeof setTimeout> = null;
-  private _getToken: null | ((ctx: SubscriptionTokenContext) => Promise<string>);
   private _minResubscribeDelay: number;
   private _maxResubscribeDelay: number;
-  private _recover: boolean;
-  private _offset: number | null;
-  private _epoch: string | null;
   private _resubscribeAttempts: number;
   private _promiseId: number;
 
-  private _token: string;
   private _data: any | null;
   private _getData: null | ((ctx: SubscriptionDataContext) => Promise<any>);
   private _recoverable: boolean;
@@ -41,13 +36,8 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     this.channel = channel;
     this.state = SubscriptionState.Unsubscribed;
     this._centrifuge = centrifuge;
-    this._token = '';
-    this._getToken = null;
     this._data = null;
     this._getData = null;
-    this._recover = false;
-    this._offset = null;
-    this._epoch = null;
     this._recoverable = false;
     this._positioned = false;
     this._joinLeave = false;
@@ -118,10 +108,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     return ++this._promiseId;
   }
 
-  private _needRecover() {
-    return this._recover === true;
-  }
-
   private _isUnsubscribed() {
     return this.state === SubscriptionState.Unsubscribed;
   }
@@ -144,10 +130,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     return false;
   }
 
-  private _usesToken() {
-    return this._token !== '' || this._getToken !== null;
-  }
-
   private _clearSubscribingState() {
     this._resubscribeAttempts = 0;
     this._clearResubscribeTimeout();
@@ -162,11 +144,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
       return;
     }
     this._clearSubscribingState();
-    if (result?.recoverable) {
-      this._recover = true;
-      this._offset = result.offset || 0;
-      this._epoch = result.epoch || '';
-    }
 
     this._setState(SubscriptionState.Subscribed);
     // @ts-ignore – we are hiding some methods from public API autocompletion.
@@ -221,63 +198,21 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
       channel: self.channel
     };
 
-    if (!this._usesToken() || this._token) {
-      if (self._getData) {
-        self._getData(getDataCtx).then(function (data: any) {
-          if (!self._isSubscribing()) {
-            return;
-          }
-          self._data = data;
-          self._sendSubscribe(self._token);
-        })
-        return null;
-      } else {
-        return self._sendSubscribe(self._token);
-      }
-    }
-
-    this._getSubscriptionToken().then(function (token) {
-      if (!self._isSubscribing()) {
-        return;
-      }
-      if (!token) {
-        self._failUnauthorized();
-        return;
-      }
-      self._token = token;
-      if (self._getData) {
-        self._getData(getDataCtx).then(function (data: any) {
-          if (!self._isSubscribing()) {
-            return;
-          }
-          self._data = data;
-          self._sendSubscribe(token);
-        })
-      } else {
-        self._sendSubscribe(token);
-      }
-    }).catch(function (e) {
-      if (!self._isSubscribing()) {
-        return;
-      }
-      if (e instanceof UnauthorizedError) {
-        self._failUnauthorized();
-        return;
-      }
-      self.emit('error', {
-        type: 'subscribeToken',
-        channel: self.channel,
-        error: {
-          code: errorCodes.subscriptionSubscribeToken,
-          message: e !== undefined ? e.toString() : ''
+    if (self._getData) {
+      self._getData(getDataCtx).then(function (data: any) {
+        if (!self._isSubscribing()) {
+          return;
         }
-      });
-      self._scheduleResubscribe();
-    });
-    return null;
+        self._data = data;
+        self._sendSubscribe();
+      })
+      return null;
+    } else {
+      return self._sendSubscribe();
+    }
   }
 
-  private _sendSubscribe(token: string): any {
+  private _sendSubscribe(): any {
     // we also need to check for transport state before sending subscription
     // because it may change for subscription with side effects (getData, getToken options)
     // @ts-ignore – we are hiding some symbols from public API autocompletion.
@@ -289,10 +224,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     const req: any = {
       channel: channel
     };
-
-    if (token) {
-      req.token = token;
-    }
 
     if (this._data) {
       req.data = this._data;
@@ -308,18 +239,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
 
     if (this._joinLeave) {
       req.join_leave = true;
-    }
-
-    if (this._needRecover()) {
-      req.recover = true;
-      const offset = this._getOffset();
-      if (offset) {
-        req.offset = offset;
-      }
-      const epoch = this._getEpoch();
-      if (epoch) {
-        req.epoch = epoch;
-      }
     }
 
     const cmd = { subscribe: req };
@@ -435,9 +354,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
       return;
     }
     if (err.code < 100 || err.code === 109 || err.temporary === true) {
-      if (err.code === 109) { // Token expired error.
-        this._token = '';
-      }
       const errContext = {
         channel: this.channel,
         type: 'subscribe',
@@ -479,12 +395,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     if (options.maxResubscribeDelay !== undefined) {
       this._maxResubscribeDelay = options.maxResubscribeDelay;
     }
-    if (options.token) {
-      this._token = options.token;
-    }
-    if (options.getToken) {
-      this._getToken = options.getToken;
-    }
     if (options.positioned === true) {
       this._positioned = true;
     }
@@ -494,22 +404,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     if (options.joinLeave === true) {
       this._joinLeave = true;
     }
-  }
-
-  private _getOffset() {
-    const offset = this._offset;
-    if (offset !== null) {
-      return offset;
-    }
-    return 0;
-  }
-
-  private _getEpoch() {
-    const epoch = this._epoch;
-    if (epoch !== null) {
-      return epoch;
-    }
-    return '';
   }
 
   private _clearRefreshTimeout() {
@@ -526,112 +420,7 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     }
   }
 
-  private _getSubscriptionToken() {
-    // @ts-ignore – we are hiding some methods from public API autocompletion.
-    this._centrifuge._debug('get subscription token for channel', this.channel);
-    const ctx = {
-      channel: this.channel
-    };
-    const getToken = this._getToken;
-    if (getToken === null) {
-      this.emit('error', {
-        type: 'configuration',
-        channel: this.channel,
-        error: {
-          code: errorCodes.badConfiguration,
-          message: 'provide a function to get channel subscription token'
-        }
-      });
-      throw new UnauthorizedError('');
-    }
-    return getToken(ctx);
-  }
-
   private _refresh() {
     this._clearRefreshTimeout();
-    const self = this;
-    this._getSubscriptionToken().then(function (token) {
-      if (!self._isSubscribed()) {
-        return;
-      }
-      if (!token) {
-        self._failUnauthorized();
-        return;
-      }
-      self._token = token;
-      const req = {
-        channel: self.channel,
-        token: token
-      };
-      const msg = {
-        'sub_refresh': req
-      };
-      // @ts-ignore – we are hiding some symbols from public API autocompletion.
-      self._centrifuge._call(msg).then(resolveCtx => {
-        // @ts-ignore - improve later.
-        const result = resolveCtx.reply.sub_refresh;
-        self._refreshResponse(result);
-        // @ts-ignore - improve later.
-        if (resolveCtx.next) {
-          // @ts-ignore - improve later.
-          resolveCtx.next();
-        }
-      }, rejectCtx => {
-        self._refreshError(rejectCtx.error);
-        if (rejectCtx.next) {
-          rejectCtx.next();
-        }
-      });
-    }).catch(function (e) {
-      if (e instanceof UnauthorizedError) {
-        self._failUnauthorized();
-        return;
-      }
-      self.emit('error', {
-        type: 'refreshToken',
-        channel: self.channel,
-        error: {
-          code: errorCodes.subscriptionRefreshToken,
-          message: e !== undefined ? e.toString() : ''
-        }
-      });
-      self._refreshTimeout = setTimeout(() => self._refresh(), self._getRefreshRetryDelay());
-    });
-  }
-
-  private _refreshResponse(result: any) {
-    if (!this._isSubscribed()) {
-      return;
-    }
-    // @ts-ignore – we are hiding some methods from public API autocompletion.
-    this._centrifuge._debug('subscription token refreshed, channel', this.channel);
-    this._clearRefreshTimeout();
-    if (result.expires === true) {
-      this._refreshTimeout = setTimeout(() => this._refresh(), ttlMilliseconds(result.ttl));
-    }
-  }
-
-  private _refreshError(err: any) {
-    if (!this._isSubscribed()) {
-      return;
-    }
-    if (err.code < 100 || err.temporary === true) {
-      this.emit('error', {
-        type: 'refresh',
-        channel: this.channel,
-        error: err
-      });
-      this._refreshTimeout = setTimeout(() => this._refresh(), this._getRefreshRetryDelay());
-    } else {
-      this._setUnsubscribed(err.code, err.message, true);
-    }
-  }
-
-  private _getRefreshRetryDelay() {
-    return backoff(0, 10000, 20000);
-  }
-
-  private _failUnauthorized() {
-    this._setUnsubscribed(unsubscribedCodes.unauthorized, 'unauthorized', true);
   }
 }
