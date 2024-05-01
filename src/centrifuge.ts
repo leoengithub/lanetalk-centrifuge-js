@@ -4,25 +4,16 @@ import {
   connectingCodes, subscribingCodes
 } from './codes';
 
-import { SockjsTransport } from './transport_sockjs';
 import { WebsocketTransport } from './transport_websocket';
-import { HttpStreamTransport } from './transport_http_stream';
-import { SseTransport } from './transport_sse';
-import { WebtransportTransport } from './transport_webtransport';
 
 import { JsonCodec } from './json';
 
-import {
-  isFunction, log, startsWith, errorExists,
-  backoff, ttlMilliseconds
-} from './utils';
+import { isFunction, log, startsWith, errorExists, backoff } from './utils';
 
 import {
   State, Options, SubscriptionState, ClientEvents,
   TypedEventEmitter, RpcResult, SubscriptionOptions,
-  HistoryOptions, HistoryResult, PublishResult,
-  PresenceResult, PresenceStatsResult, SubscribedContext,
-  TransportEndpoint,
+  SubscribedContext, TransportEndpoint,
 } from './types';
 
 import EventEmitter from 'events';
@@ -79,7 +70,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   private _reconnecting: boolean;
   private _reconnectTimeout?: null | ReturnType<typeof setTimeout> = null;
   private _reconnectAttempts: number;
-  private _client: null;
   private _session: string;
   private _node: string;
   private _subs: Record<string, Subscription>;
@@ -127,7 +117,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     this._reconnecting = false;
     this._reconnectTimeout = null;
     this._reconnectAttempts = 0;
-    this._client = null;
     this._session = '';
     this._node = '';
     this._subs = {};
@@ -290,104 +279,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     });
   }
 
-  /** publish data to a channel. */
-  publish(channel: string, data: any): Promise<PublishResult> {
-    const cmd = {
-      publish: {
-        channel: channel,
-        data: data
-      }
-    };
-
-    const self = this;
-
-    return this._methodCall().then(function () {
-      return self._callPromise(cmd, function () {
-        return {};
-      });
-    });
-  }
-
-  /** history for a channel. By default it does not return publications (only current
-   *  StreamPosition data) – provide an explicit limit > 0 to load publications.*/
-  history(channel: string, options?: HistoryOptions): Promise<HistoryResult> {
-    const cmd = {
-      history: this._getHistoryRequest(channel, options)
-    };
-
-    const self = this;
-
-    return this._methodCall().then(function () {
-      return self._callPromise(cmd, function (reply: any) {
-        const result = reply.history;
-        const publications: any[] = [];
-        if (result.publications) {
-          for (let i = 0; i < result.publications.length; i++) {
-            publications.push(self._getPublicationContext(channel, result.publications[i]));
-          }
-        }
-        return {
-          'publications': publications,
-          'epoch': result.epoch || '',
-          'offset': result.offset || 0
-        };
-      });
-    });
-  }
-
-  /** presence for a channel. */
-  presence(channel: string): Promise<PresenceResult> {
-    const cmd = {
-      presence: {
-        channel: channel
-      }
-    };
-
-    const self = this;
-
-    return this._methodCall().then(function () {
-      return self._callPromise(cmd, function (reply: any) {
-        const clients = reply.presence.presence;
-        for (const clientId in clients) {
-          if (clients.hasOwnProperty(clientId)) {
-            const connInfo = clients[clientId]['conn_info'];
-            const chanInfo = clients[clientId]['chan_info'];
-            if (connInfo) {
-              clients[clientId].connInfo = connInfo;
-            }
-            if (chanInfo) {
-              clients[clientId].chanInfo = chanInfo;
-            }
-          }
-        }
-        return {
-          'clients': clients
-        };
-      });
-    });
-  }
-
-  /** presence stats for a channel. */
-  presenceStats(channel: string): Promise<PresenceStatsResult> {
-    const cmd = {
-      'presence_stats': {
-        channel: channel
-      }
-    };
-
-    const self = this;
-
-    return this._methodCall().then(function () {
-      return self._callPromise(cmd, function (reply: any) {
-        const result = reply.presence_stats;
-        return {
-          'numUsers': result.num_users,
-          'numClients': result.num_clients
-        };
-      });
-    });
-  }
-
   /** start command batching (collect into temporary buffer without sending to a server) 
    * until stopBatching called.*/
   startBatching() {
@@ -418,11 +309,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     log('debug', args);
   }
 
-  /** @internal */
-  protected _formatOverride() {
-    return;
-  }
-
   private _configure() {
     if (!('Promise' in globalThis)) {
       throw new Error('Promise polyfill required');
@@ -432,16 +318,11 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       throw new Error('endpoint configuration required');
     }
 
-    if (this._config.token !== null) {
-      this._token = this._config.token;
-    }
-
     if (this._config.data !== null) {
       this._data = this._config.data;
     }
 
     this._codec = new JsonCodec();
-    this._formatOverride();
 
     if (this._config.debug === true ||
       (typeof localStorage !== 'undefined' && localStorage.getItem('centrifuge.debug'))) {
@@ -561,7 +442,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   }
 
   private _clearConnectedState() {
-    this._client = null;
     this._clearServerPingTimeout();
     this._clearRefreshTimeout();
 
@@ -606,8 +486,14 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     if (!this._transport) {
       return false
     }
+
+    const commandToSend = commands.map((command) => ({
+      id: `${command.id}`,
+      ...(command.connect?.data || command.subscribe?.data || {})
+    }))
+    
     try {
-      this._transport.send(this._codec.encodeCommands(commands), this._session, this._node);
+      this._transport.send(this._codec.encodeCommands(commandToSend), this._session, this._node);
     } catch (e) {
       this._debug('error writing commands', e);
       this._handleWriteError(commands);
@@ -623,42 +509,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     } else {
       if (!(typeof globalThis.WebSocket !== 'function' && typeof globalThis.WebSocket !== 'object')) {
         websocket = globalThis.WebSocket;
-      }
-    }
-
-    let sockjs = null;
-    if (this._config.sockjs !== null) {
-      sockjs = this._config.sockjs;
-    } else {
-      if (typeof globalThis.SockJS !== 'undefined') {
-        sockjs = globalThis.SockJS;
-      }
-    }
-
-    let eventsource: any = null;
-    if (this._config.eventsource !== null) {
-      eventsource = this._config.eventsource;
-    } else {
-      if (typeof globalThis.EventSource !== 'undefined') {
-        eventsource = globalThis.EventSource;
-      }
-    }
-
-    let fetchFunc: any = null;
-    if (this._config.fetch !== null) {
-      fetchFunc = this._config.fetch;
-    } else {
-      if (typeof globalThis.fetch !== 'undefined') {
-        fetchFunc = globalThis.fetch;
-      }
-    }
-
-    let readableStream: any = null;
-    if (this._config.readableStream !== null) {
-      readableStream = this._config.readableStream;
-    } else {
-      if (typeof globalThis.ReadableStream !== 'undefined') {
-        readableStream = globalThis.ReadableStream;
       }
     }
 
@@ -695,59 +545,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
           });
           if (!this._transport.supported()) {
             this._debug('websocket transport not available');
-            this._currentTransportIndex++;
-            count++;
-            continue;
-          }
-        } else if (transportName === 'webtransport') {
-          this._debug('trying webtransport transport');
-          this._transport = new WebtransportTransport(transportEndpoint, {
-            webtransport: globalThis.WebTransport,
-            decoder: this._codec,
-            encoder: this._codec
-          });
-          if (!this._transport.supported()) {
-            this._debug('webtransport transport not available');
-            this._currentTransportIndex++;
-            count++;
-            continue;
-          }
-        } else if (transportName === 'http_stream') {
-          this._debug('trying http_stream transport');
-          this._transport = new HttpStreamTransport(transportEndpoint, {
-            fetch: fetchFunc,
-            readableStream: readableStream,
-            emulationEndpoint: this._config.emulationEndpoint,
-            decoder: this._codec,
-            encoder: this._codec
-          });
-          if (!this._transport.supported()) {
-            this._debug('http_stream transport not available');
-            this._currentTransportIndex++;
-            count++;
-            continue;
-          }
-        } else if (transportName === 'sse') {
-          this._debug('trying sse transport');
-          this._transport = new SseTransport(transportEndpoint, {
-            eventsource: eventsource,
-            fetch: fetchFunc,
-            emulationEndpoint: this._config.emulationEndpoint,
-          });
-          if (!this._transport.supported()) {
-            this._debug('sse transport not available');
-            this._currentTransportIndex++;
-            count++;
-            continue;
-          }
-        } else if (transportName === 'sockjs') {
-          this._debug('trying sockjs');
-          this._transport = new SockjsTransport(transportEndpoint, {
-            sockjs: sockjs,
-            sockjsOptions: this._config.sockjsOptions
-          });
-          if (!this._transport.supported()) {
-            this._debug('sockjs transport not available');
             this._currentTransportIndex++;
             count++;
             continue;
@@ -894,16 +691,16 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   private _sendConnect(skipSending: boolean): any {
     const connectCommand = this._constructConnectCommand();
     const self = this;
-    this._call(connectCommand, skipSending).then(resolveCtx => {
+    this._call(connectCommand, skipSending).then(resolveCtx => {      
       // @ts-ignore = improve later.
-      const result = resolveCtx.reply.connect;
+      const result = resolveCtx.reply.result;
       self._connectResponse(result);
       // @ts-ignore - improve later.
       if (resolveCtx.next) {
         // @ts-ignore - improve later.
         resolveCtx.next();
       }
-    }, rejectCtx => {
+    }, rejectCtx => {      
       self._connectError(rejectCtx.error);
       if (rejectCtx.next) {
         rejectCtx.next();
@@ -945,50 +742,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       }
       return;
     }
-
-    this._getToken().then(function (token: string) {
-      if (!self._isConnecting()) {
-        return;
-      }
-      if (token == null || token == undefined) {
-        self._failUnauthorized();
-        return;
-      }
-      self._token = token;
-      self._debug('connection token refreshed');
-      if (self._config.getData) {
-        self._config.getData().then(function (data: any) {
-          if (!self._isConnecting()) {
-            return;
-          }
-          self._data = data;
-          self._initializeTransport();
-        })
-      } else {
-        self._initializeTransport();
-      }
-    }).catch(function (e) {
-      if (!self._isConnecting()) {
-        return;
-      }
-      if (e instanceof UnauthorizedError) {
-        self._failUnauthorized();
-        return;
-      }
-      self.emit('error', {
-        'type': 'connectToken',
-        'error': {
-          code: errorCodes.clientConnectToken,
-          message: e !== undefined ? e.toString() : ''
-        }
-      });
-      const delay = self._getReconnectDelay();
-      self._debug('error on connection token refresh, reconnect after ' + delay + ' milliseconds', e);
-      self._reconnecting = false;
-      self._reconnectTimeout = setTimeout(() => {
-        self._startReconnecting();
-      }, delay);
-    });
   }
 
   private _connectError(err: any) {
@@ -1071,29 +824,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     };
   }
 
-  private _getHistoryRequest(channel: string, options?: HistoryOptions) {
-    const req: any = {
-      channel: channel
-    };
-    if (options !== undefined) {
-      if (options.since) {
-        req.since = {
-          offset: options.since.offset
-        };
-        if (options.since.epoch) {
-          req.since.epoch = options.since.epoch;
-        }
-      }
-      if (options.limit !== undefined) {
-        req.limit = options.limit;
-      }
-      if (options.reverse === true) {
-        req.reverse = true;
-      }
-    }
-    return req;
-  }
-
   private _methodCall(): any {
     if (this._isConnected()) {
       return Promise.resolve();
@@ -1173,15 +903,15 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       return p;
     }
 
-    const id = reply.id;
+    const id = +reply.id;
 
     if (id && id > 0) {
       this._handleReply(reply, next);
     } else {
-      if (!reply.push) {
+      if (!reply.result) {
         this._handleServerPing(next);
       } else {
-        this._handlePush(reply.push, next);
+        this._handlePush(reply.result, next);
       }
     }
 
@@ -1203,7 +933,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     if (this._setState(State.Connecting)) {
       this.emit('connecting', { code: connectingCodes.connectCalled, reason: 'connect called' });
     }
-    this._client = null;
     this._startReconnecting();
   }
 
@@ -1261,108 +990,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       this._debug("no transport to close");
     }
     this._scheduleReconnect();
-  }
-
-  private _failUnauthorized() {
-    this._disconnect(disconnectedCodes.unauthorized, 'unauthorized', false);
-  }
-
-  private _getToken(): Promise<string> {
-    this._debug('get connection token');
-    if (!this._config.getToken) {
-      this.emit('error', {
-        type: 'configuration',
-        error: {
-          code: errorCodes.badConfiguration,
-          message: 'token expired but no getToken function set in the configuration'
-        }
-      });
-      throw new UnauthorizedError('');
-    }
-    return this._config.getToken({});
-  }
-
-  private _refresh() {
-    const clientId = this._client;
-    const self = this;
-    this._getToken().then(function (token) {
-      if (clientId !== self._client) {
-        return;
-      }
-      if (!token) {
-        self._failUnauthorized();
-        return;
-      }
-      self._token = token;
-      self._debug('connection token refreshed');
-
-      if (!self._isConnected()) {
-        return;
-      }
-
-      const cmd = {
-        refresh: { token: self._token }
-      };
-
-      self._call(cmd, false).then(resolveCtx => {
-        // @ts-ignore - improve later.
-        const result = resolveCtx.reply.refresh;
-        self._refreshResponse(result);
-        // @ts-ignore - improve later.
-        if (resolveCtx.next) {
-          // @ts-ignore - improve later.
-          resolveCtx.next();
-        }
-      }, rejectCtx => {
-        self._refreshError(rejectCtx.error);
-        if (rejectCtx.next) {
-          rejectCtx.next();
-        }
-      });
-    }).catch(function (e) {
-      if (!self._isConnected()) {
-        return;
-      }
-      if (e instanceof UnauthorizedError) {
-        self._failUnauthorized();
-        return;
-      }
-      self.emit('error', {
-        type: 'refreshToken',
-        error: {
-          code: errorCodes.clientRefreshToken,
-          message: e !== undefined ? e.toString() : ''
-        }
-      });
-      self._refreshTimeout = setTimeout(() => self._refresh(), self._getRefreshRetryDelay());
-    });
-  }
-
-  private _refreshError(err: any) {
-    if (err.code < 100 || err.temporary === true) {
-      this.emit('error', {
-        type: 'refresh',
-        error: err
-      });
-      this._refreshTimeout = setTimeout(() => this._refresh(), this._getRefreshRetryDelay());
-    } else {
-      this._disconnect(err.code, err.message, false);
-    }
-  }
-
-  private _getRefreshRetryDelay() {
-    return backoff(0, 5000, 10000);
-  }
-
-  private _refreshResponse(result: any) {
-    if (this._refreshTimeout) {
-      clearTimeout(this._refreshTimeout);
-      this._refreshTimeout = null;
-    }
-    if (result.expires) {
-      this._client = result.client;
-      this._refreshTimeout = setTimeout(() => this._refresh(), ttlMilliseconds(result.ttl));
-    }
   }
 
   private _removeSubscription(sub: Subscription | null) {
@@ -1441,14 +1068,10 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       return;
     }
 
-    this._client = result.client;
     this._setState(State.Connected);
 
     if (this._refreshTimeout) {
       clearTimeout(this._refreshTimeout);
-    }
-    if (result.expires) {
-      this._refreshTimeout = setTimeout(() => this._refresh(), ttlMilliseconds(result.ttl));
     }
 
     this._session = result.session;
@@ -1470,57 +1093,12 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
 
     this._resolvePromises();
 
-    this._processServerSubs(result.subs || {});
-
     if (result.ping && result.ping > 0) {
       this._serverPing = result.ping * 1000;
       this._sendPong = result.pong === true;
       this._waitServerPing();
     } else {
       this._serverPing = 0;
-    }
-  }
-
-  private _processServerSubs(subs: Record<string, any>) {
-    for (const channel in subs) {
-      if (!subs.hasOwnProperty(channel)) {
-        continue;
-      }
-      const sub = subs[channel];
-      this._serverSubs[channel] = {
-        'offset': sub.offset,
-        'epoch': sub.epoch,
-        'recoverable': sub.recoverable || false
-      };
-      const subCtx = this._getSubscribeContext(channel, sub);
-      this.emit('subscribed', subCtx);
-    }
-
-    for (const channel in subs) {
-      if (!subs.hasOwnProperty(channel)) {
-        continue;
-      }
-      const sub = subs[channel];
-      if (sub.recovered) {
-        const pubs = sub.publications;
-        if (pubs && pubs.length > 0) {
-          for (const i in pubs) {
-            if (pubs.hasOwnProperty(i)) {
-              this._handlePublication(channel, pubs[i]);
-            }
-          }
-        }
-      }
-    }
-
-    for (const channel in this._serverSubs) {
-      if (!this._serverSubs.hasOwnProperty(channel)) {
-        continue;
-      }
-      if (!subs[channel]) {
-        this.emit('unsubscribed', { channel: channel });
-        delete this._serverSubs[channel];
-      }
     }
   }
 
@@ -1564,38 +1142,9 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
   private _getSubscribeContext(channel: string, result: any): SubscribedContext {
     const ctx: any = {
       channel: channel,
-      positioned: false,
-      recoverable: false,
-      wasRecovering: false,
-      recovered: false
     };
-    if (result.recovered) {
-      ctx.recovered = true;
-    }
-    if (result.positioned) {
-      ctx.positioned = true;
-    }
-    if (result.recoverable) {
-      ctx.recoverable = true;
-    }
-    if (result.was_recovering) {
-      ctx.wasRecovering = true;
-    }
-    let epoch = '';
-    if ('epoch' in result) {
-      epoch = result.epoch;
-    }
-    let offset = 0;
-    if ('offset' in result) {
-      offset = result.offset;
-    }
-    if (ctx.positioned || ctx.recoverable) {
-      ctx.streamPosition = {
-        'offset': offset,
-        'epoch': epoch
-      };
-    }
-    if (result.data) {
+    
+    if (result?.data) {
       ctx.data = result.data;
     }
     return ctx;
@@ -1626,32 +1175,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       const error = reply.error;
       errback({ error, next });
     }
-  }
-
-  private _handleJoin(channel: string, join: any) {
-    const sub = this._getSub(channel);
-    if (!sub) {
-      if (this._isServerSub(channel)) {
-        const ctx = { channel: channel, info: this._getJoinLeaveContext(join.info) };
-        this.emit('join', ctx);
-      }
-      return;
-    }
-    // @ts-ignore – we are hiding some symbols from public API autocompletion.
-    sub._handleJoin(join);
-  }
-
-  private _handleLeave(channel: string, leave: any) {
-    const sub = this._getSub(channel);
-    if (!sub) {
-      if (this._isServerSub(channel)) {
-        const ctx = { channel: channel, info: this._getJoinLeaveContext(leave.info) };
-        this.emit('leave', ctx);
-      }
-      return;
-    }
-    // @ts-ignore – we are hiding some symbols from public API autocompletion.
-    sub._handleLeave(leave);
   }
 
   private _handleUnsubscribe(channel: string, unsubscribe: any) {
@@ -1690,43 +1213,11 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     this._disconnect(code, disconnect.reason, reconnect);
   }
 
-  private _getPublicationContext(channel: string, pub: any) {
-    const ctx: any = {
-      channel: channel,
-      data: pub.data
-    };
-    if (pub.offset) {
-      ctx.offset = pub.offset;
-    }
-    if (pub.info) {
-      ctx.info = this._getJoinLeaveContext(pub.info);
-    }
-    if (pub.tags) {
-      ctx.tags = pub.tags;
-    }
-    return ctx;
-  }
-
-  private _getJoinLeaveContext(clientInfo: any) {
-    const info: any = {
-      client: clientInfo.client,
-      user: clientInfo.user
-    };
-    if (clientInfo.conn_info) {
-      info.connInfo = clientInfo.conn_info;
-    }
-    if (clientInfo.chan_info) {
-      info.chanInfo = clientInfo.chan_info;
-    }
-    return info;
-  }
-
   private _handlePublication(channel: string, pub: any) {
     const sub = this._getSub(channel);
     if (!sub) {
       if (this._isServerSub(channel)) {
-        const ctx = this._getPublicationContext(channel, pub);
-        this.emit('publication', ctx);
+        this.emit('publication', pub);
         if (pub.offset !== undefined) {
           this._serverSubs[channel].offset = pub.offset;
         }
@@ -1735,10 +1226,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     }
     // @ts-ignore – we are hiding some symbols from public API autocompletion.
     sub._handlePublication(pub);
-  }
-
-  private _handleMessage(message: any) {
-    this.emit('message', { data: message.data });
   }
 
   private _handleServerPing(next: any) {
@@ -1751,20 +1238,16 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
 
   private _handlePush(data: any, next: any) {
     const channel = data.channel;
-    if (data.pub) {
-      this._handlePublication(channel, data.pub);
-    } else if (data.message) {
-      this._handleMessage(data.message);
-    } else if (data.join) {
-      this._handleJoin(channel, data.join);
-    } else if (data.leave) {
-      this._handleLeave(channel, data.leave);
-    } else if (data.unsubscribe) {
-      this._handleUnsubscribe(channel, data.unsubscribe);
-    } else if (data.subscribe) {
-      this._handleSubscribe(channel, data.subscribe);
-    } else if (data.disconnect) {
-      this._handleDisconnect(data.disconnect);
+    if (data) {
+      this._handlePublication(channel, data);
+    // } else if (data.message) {
+    //   this._handleMessage(data.message);
+    // } else if (data.unsubscribe) {
+    //   this._handleUnsubscribe(channel, data.unsubscribe);
+    // } else if (data.subscribe) {
+    //   this._handleSubscribe(channel, data.subscribe);
+    // } else if (data.disconnect) {
+    //   this._handleDisconnect(data.disconnect);
     }
     next();
   }

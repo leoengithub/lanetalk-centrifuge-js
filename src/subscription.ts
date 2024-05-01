@@ -2,8 +2,7 @@ import EventEmitter from 'events';
 import { Centrifuge, UnauthorizedError } from './centrifuge';
 import { errorCodes, unsubscribedCodes, subscribingCodes, connectingCodes } from './codes';
 import {
-  HistoryOptions, HistoryResult, PresenceResult, PresenceStatsResult,
-  PublishResult, State, SubscriptionEvents, SubscriptionOptions,
+  State, SubscriptionEvents, SubscriptionOptions,
   SubscriptionState, SubscriptionTokenContext, TypedEventEmitter,
   SubscriptionDataContext
 } from './types';
@@ -115,59 +114,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     this._setUnsubscribed(unsubscribedCodes.unsubscribeCalled, 'unsubscribe called', true);
   }
 
-  /** publish data to a channel.*/
-  publish(data: any): Promise<PublishResult> {
-    const self = this;
-    return this._methodCall().then(function () {
-      return self._centrifuge.publish(self.channel, data);
-    });
-  }
-
-  /** get online presence for a channel.*/
-  presence(): Promise<PresenceResult> {
-    const self = this;
-    return this._methodCall().then(function () {
-      return self._centrifuge.presence(self.channel);
-    });
-  }
-
-  /** presence stats for a channel (num clients and unique users).*/
-  presenceStats(): Promise<PresenceStatsResult> {
-    const self = this;
-    return this._methodCall().then(function () {
-      return self._centrifuge.presenceStats(self.channel);
-    });
-  }
-
-  /** history for a channel. By default it does not return publications (only current
-   *  StreamPosition data) – provide an explicit limit > 0 to load publications.*/
-  history(opts: HistoryOptions): Promise<HistoryResult> {
-    const self = this;
-    return this._methodCall().then(function () {
-      return self._centrifuge.history(self.channel, opts);
-    });
-  }
-
-  private _methodCall(): any {
-    if (this._isSubscribed()) {
-      return Promise.resolve();
-    }
-    if (this._isUnsubscribed()) {
-      return Promise.reject({ code: errorCodes.subscriptionUnsubscribed, message: this.state });
-    }
-    return new Promise((res, rej) => {
-      const timeout = setTimeout(function () {
-        rej({ code: errorCodes.timeout, message: 'timeout' });
-        // @ts-ignore – we are hiding some symbols from public API autocompletion.
-      }, this._centrifuge._config.timeout);
-      this._promises[this._nextPromiseId()] = {
-        timeout: timeout,
-        resolve: res,
-        reject: rej
-      };
-    });
-  }
-
   private _nextPromiseId() {
     return ++this._promiseId;
   }
@@ -216,8 +162,7 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
       return;
     }
     this._clearSubscribingState();
-
-    if (result.recoverable) {
+    if (result?.recoverable) {
       this._recover = true;
       this._offset = result.offset || 0;
       this._epoch = result.epoch || '';
@@ -385,10 +330,8 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     this._centrifuge._call(cmd).then(resolveCtx => {
       this._inflight = false;
       // @ts-ignore - improve later.
-      const result = resolveCtx.reply.subscribe;
-      this._handleSubscribeResponse(
-        result
-      );
+      const result = resolveCtx.reply.result;
+      this._handleSubscribeResponse(result);
       // @ts-ignore - improve later.
       if (resolveCtx.next) {
         // @ts-ignore - improve later.
@@ -448,24 +391,7 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
   }
 
   private _handlePublication(pub: any) {
-    // @ts-ignore – we are hiding some methods from public API autocompletion.
-    const ctx = this._centrifuge._getPublicationContext(this.channel, pub);
-    this.emit('publication', ctx);
-    if (pub.offset) {
-      this._offset = pub.offset;
-    }
-  }
-
-  protected _handleJoin(join: any) {
-    // @ts-ignore – we are hiding some methods from public API autocompletion.
-    const info = this._centrifuge._getJoinLeaveContext(join.info)
-    this.emit('join', { channel: this.channel, info: info });
-  }
-
-  protected _handleLeave(leave: any) {
-    // @ts-ignore – we are hiding some methods from public API autocompletion.
-    const info = this._centrifuge._getJoinLeaveContext(leave.info)
-    this.emit('leave', { channel: this.channel, info: info });
+    this.emit('publication', pub);
   }
 
   private _resolvePromises() {
