@@ -378,11 +378,6 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
     if (!options) {
       return;
     }
-    if (options.since) {
-      this._offset = options.since.offset;
-      this._epoch = options.since.epoch;
-      this._recover = true;
-    }
     if (options.data) {
       this._data = options.data;
     }

@@ -13,7 +13,7 @@ import { isFunction, log, startsWith, errorExists, backoff } from './utils';
 import {
   State, Options, SubscriptionState, ClientEvents,
   TypedEventEmitter, RpcResult, SubscriptionOptions,
-  SubscribedContext, TransportEndpoint,
+  TransportEndpoint,
 } from './types';
 
 import EventEmitter from 'events';
@@ -1139,17 +1139,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
     }, this._serverPing + this._config.maxServerPingDelay);
   }
 
-  private _getSubscribeContext(channel: string, result: any): SubscribedContext {
-    const ctx: any = {
-      channel: channel,
-    };
-    
-    if (result?.data) {
-      ctx.data = result.data;
-    }
-    return ctx;
-  }
-
   private _handleReply(reply: any, next: any) {
     const id = reply.id;
     if (!(id in this._callbacks)) {
@@ -1175,42 +1164,6 @@ export class Centrifuge extends (EventEmitter as new () => TypedEventEmitter<Cli
       const error = reply.error;
       errback({ error, next });
     }
-  }
-
-  private _handleUnsubscribe(channel: string, unsubscribe: any) {
-    const sub = this._getSub(channel);
-    if (!sub) {
-      if (this._isServerSub(channel)) {
-        delete this._serverSubs[channel];
-        this.emit('unsubscribed', { channel: channel });
-      }
-      return;
-    }
-    if (unsubscribe.code < 2500) {
-      // @ts-ignore – we are hiding some symbols from public API autocompletion.
-      sub._setUnsubscribed(unsubscribe.code, unsubscribe.reason, false);
-    } else {
-      // @ts-ignore – we are hiding some symbols from public API autocompletion.
-      sub._setSubscribing(unsubscribe.code, unsubscribe.reason);
-    }
-  }
-
-  private _handleSubscribe(channel: string, sub: any) {
-    this._serverSubs[channel] = {
-      'offset': sub.offset,
-      'epoch': sub.epoch,
-      'recoverable': sub.recoverable || false
-    };
-    this.emit('subscribed', this._getSubscribeContext(channel, sub));
-  }
-
-  private _handleDisconnect(disconnect: any) {
-    const code = disconnect.code;
-    let reconnect = true;
-    if ((code >= 3500 && code < 4000) || (code >= 4500 && code < 5000)) {
-      reconnect = false;
-    }
-    this._disconnect(code, disconnect.reason, reconnect);
   }
 
   private _handlePublication(channel: string, pub: any) {

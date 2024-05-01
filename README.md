@@ -732,31 +732,10 @@ Timeout for operations in milliseconds.
 
 `websocket` option allows to explicitly provide custom WebSocket client to use. By default centrifuge-js will try to use global WebSocket object, so if you are in web browser – it will just use native WebSocket implementation. See notes about using `centrifuge-js` with NodeJS below.
 
-### sockjs
-
-`sockjs` option allows to explicitly provide SockJS client object to Centrifuge client.
-
-## Protobuf support
-
-To import client which uses Protobuf protocol under the hood:
-
-```html
-<script src="https://unpkg.com/centrifuge@5.0.0/dist/centrifuge.protobuf.js"></script>
-```
-
 Or if you are developing with npm:
 
 ```javascript
 import { Centrifuge } from 'centrifuge/build/protobuf';
-```
-
-This client uses [protobuf.js](https://github.com/dcodeIO/ProtoBuf.js/) under the hood.
-
-When running with Protobuf-based client, you can send and receive any binary data as `Uint8Array`. Make sure data is properly encoded when calling methods of Centrifuge Protobuf-based instance. For example, you can not just send JSON-like objects like in JSON protocol case, you need to encode data to `Uint8Array` first:
-
-```javascript
-const data = new TextEncoder("utf-8").encode(JSON.stringify({"any": "data"})); 
-sub.publish(data);
 ```
 
 ## Using with NodeJS
