@@ -147,8 +147,8 @@ export class Subscription extends (EventEmitter as new () => TypedEventEmitter<S
 
     this._setState(SubscriptionState.Subscribed);
     // @ts-ignore – we are hiding some methods from public API autocompletion.
-    const ctx = this._centrifuge._getSubscribeContext(this.channel, result);
-    this.emit('subscribed', ctx);
+    // const ctx = this._centrifuge._getSubscribeContext(this.channel, result);
+    this.emit('subscribed', result);
     this._resolvePromises();
 
     const pubs = result.publications;
